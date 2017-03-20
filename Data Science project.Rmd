@@ -1,0 +1,482 @@
+---
+title: "Facebook comments / Data science project"
+author: "Judit Szlameniczky"
+date: "March 19, 2017"
+output: 
+  prettydoc::html_pretty:
+    theme: cayman
+    highlight: github
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## **1. Introduction**
+
+The leading treads towards social networking services, such as Facebook and Twitter had drawn massive public attention in the last decade. The amount of data that is uploaded to these social networking services is increasing day by day. So, there is an increasing need to study the highly dynamic behavior of users towards these services. This project work to model user patterns of Facebook. I used the dataset to predict if a post is expected to receive comments in the next H hrs. I used Ranom Forest, GBM and Neural Networks for modelling. I evaluated them based on Area Under Curve, F1 score and classification error metrics and I concluded that Random Forest model performs the best.
+
+
+##**2. Data cleaning and exploration**
+
+###**Data used for the project**
+Access to the dataset: [Dataset](http://archive.ics.uci.edu/ml/datasets/Facebook%20Comment%20Volume%20Dataset#)  
+The dataset has been reduced due to computer capacity. The version used contains 20295 observations and 29 variables. 
+
+###**Predictors and the predicted variable:**
+Below is the description of the variables used for prediction:  
+(Note: They were named as per their descriptions, also some of the original variables have been removed before the analysis due to lack of information about their purpose):  
+
+**Page Popularity/likes:** Defines the popularity or support for the source of the document  
+**Page Checkins:** Describes how many individuals so far visited this place. This feature is only associated with the places eg:some institution, place, theater etc.  
+**Page talking about: ** Defines the daily interest of individuals towards source of the document/ Post. The people who actually come back to the page, after liking the page. This include activities such as comments, likes to a post, shares, etc by visitors to the page.  
+**Page Category:** Defines the category of the source of the document eg: place, institution, brand etc.  
+**CC1:** The total number of comments before selected base date/time.  
+**CC2:** The number of comments in last 24 hours, relative to base date/time.  
+**CC3:** The number of comments in last 48 to last 24 hours relative to base date/time.  
+**CC4:** The number of comments in the first 24 hours after the publication of post but before base date/time.  
+**CC5:** The difference between CC2 and CC3.  
+**Base time:** Selected time in order to simulate the scenario.  
+**Post length:** Character count in the post.  
+**Post Share Count:** This features counts the no of shares of the post, that how many peoples had shared this post on to their timeline.  
+**Post Promotion Status:** To reach more people with posts in News Feed, individual promote their post and this features tells that whether the post is promoted(1) or not(0).  
+**H Local:** This describes the H hrs, for which we have the target variable/ comments received.  
+**PostSun - PostSat:** This represents the day(Sunday...Saturday) on which the post was published.  
+**BaseSun-BaseSat:** This represents the day(Sunday...Saturday) on selected base Date/Time.  
+**Target Variable:** The no of comments in next H hrs(H is given in Feature no 39).  
+
+###**Set up and loading libraries, loading data**
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+# install.packages("randomForest")
+# install.packages("DMwR")
+# install.packages("PRROC")
+# install.packages("ROCR")
+# install.packages("nnet")
+# install.packages("caret")
+library(DMwR)
+library(ROCR)
+library(ggplot2)
+library(randomForest)
+library(nnet)
+library(caret)
+library(PRROC)
+library(readr)
+library(dplyr)
+library(reshape2)
+library(ggplot2)
+library(knitr)
+
+getwd()
+setwd("F:\\CEU\\Data Science\\Dataset\\Dataset\\Training")
+data <- read.csv("Features_Variant_7.csv")
+
+
+#Exploratory data analysis
+
+#Quick look and cleaning
+head(data)
+dim(data)
+str(data)
+colnames(data)
+
+summary(data)
+
+sapply(data, function(x) sum(is.na(x)))
+```
+
+###**Descriptive statistics**
+After having a first quick look at the data, such as the different variables, number of observations and if there are missing values, I examined some of the variables more closely. (Note: There were no observations with missing values to be removed during data cleaning.)  
+Overall I decided to drop only the outliers represented by the variable Page popularity/likes on top of those 25 that were already removed at the beginning (see above).
+
+**Page Popularity/likes**
+
+The distribution of Page Popularity/likes shows a skewed distribution with a long right tail. The values largly vary between 530 and 162600000 with outliers at the higher end.
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+##Page.Popularity.likes
+summary(data$Page.Popularity.likes)
+
+ggplot(data) + geom_histogram(aes(x = Page.Popularity.likes), fill = 'skyblue')
+ggplot(data) + geom_histogram(aes(x = log(Page.Popularity.likes)), fill = 'skyblue')
+boxplot(data$Page.Popularity.likes)
+```
+
+Drop outliers above 10,000,000:
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+##Drop outliers 
+data <- subset(data,Page.Popularity.likes < 10000000)
+ggplot(data) + geom_histogram(aes(x = Page.Popularity.likes), fill = 'skyblue')
+boxplot(data$Page.Popularity.likes)
+```
+
+**Page Checkins**
+
+Page Checkins also show a skewed distribution with a long right tail with some outliers.
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+##Page.Checkins
+summary(data$Page.Checkins)
+
+ggplot(data) + geom_histogram(aes(x = Page.Checkins), fill = 'skyblue')
+boxplot(data$Page.Checkins)
+```
+
+**Page talking about**
+
+Page talking about variable does not show any specific pattern. It is rather skewed with a left tail.
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+##Page.talking.about
+summary(data$Page.talking.about)
+
+ggplot(data) + geom_histogram(aes(x = log(Page.talking.about)), fill = 'skyblue')
+boxplot(data$Page.talking.about)
+
+```
+
+**Page category**
+
+Page category is quite scattered, 9 being the most frequent one.
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+##Page.category
+summary(data$Page.Category)
+
+ggplot(data) + geom_histogram(aes(x = Page.Category), fill = 'skyblue')
+```
+
+**Page length**
+
+Page length has a skewed distribution with a long right tail.
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+summary(data$Post.length)
+
+ggplot(data) + geom_histogram(aes(x = Post.length), fill = 'skyblue')
+```
+
+**Page share count**
+
+Page share count has a skewed distribution with a long right tail.
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+##Post.Share.Count
+summary(data$Post.Share.Count)
+
+ggplot(data) + geom_histogram(aes(x = Post.Share.Count), fill = 'skyblue')
+```
+
+**Post day of the week**
+
+The number of comments show a very similar distribution for each day of the week with minor differences, such as lower numbers over the weekends.
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+#Post day of week
+data$day[data$PostMon == 1] <- "Monday"
+data$day[data$PostTue == 1] <- "Tuesday"
+data$day[data$PostWed == 1] <- "Wednesday"
+data$day[data$PostThu == 1] <- "Thursday"
+data$day[data$PostFri == 1] <- "Friday"
+data$day[data$PostSat == 1] <- "Saturday"
+data$day[data$PostSun == 1] <- "Sunday"
+
+ggplot(data, aes(x = log(Target.Variable))) +
+  geom_histogram(aes(fill=..count..))+facet_wrap(~day)+scale_fill_distiller(palette="Spectral")
+```
+
+**Basetime day of week**
+
+Like the day of the post, basetime day distribution pattern is very similar for each day of the week. In this case weekends does not show a difference either.
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+#Basetime day of week
+data$baseday[data$BaseMon == 1] <- "Monday"
+data$baseday[data$BaseTue == 1] <- "Tuesday"
+data$baseday[data$BaseWed == 1] <- "Wednesday"
+data$baseday[data$BasedThu == 1] <- "Thursday"
+data$baseday[data$BaseFri == 1] <- "Friday"
+data$baseday[data$BaseSat == 1] <- "Saturday"
+data$baseday[data$BaseSun == 1] <- "Sunday"
+
+ggplot(data, aes(x = log(Target.Variable))) +
+  geom_histogram(aes(fill=..count..))+facet_wrap(~baseday)+scale_fill_distiller(palette="Spectral")
+```
+
+
+####Target variable
+
+**Original Target variable**
+
+The original target variable shows the number of comments the post received within H hours after the basetime. Its distribution is skewed with a long right tail. 
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+#Target Variable
+
+summary(data$New.Target.Variable)
+
+ggplot(data) + geom_histogram(aes(x =Target.Variable), fill = 'skyblue', binwidth = 10)
+```
+
+**Create new target variable**
+
+In order to turn this exercise into a classification, I introduced a new target variable that indicates whether a post received comments or not. The number of observations in each category is quite balanced as it can be concluded from the histogram as well.
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+#creating new target variable to show if post got comments
+data$New.Target.Variable[data$Target.Variable == 0] <- "no comments"
+data$New.Target.Variable[data$Target.Variable > 0] <- "comments"
+
+summary(data$New.Target.Variable)
+
+ggplot(data) + geom_bar(aes(x = New.Target.Variable), fill = 'skyblue')
+```
+
+
+##**3. Machine learning**
+
+###**Split data set**
+
+As a start, I splitted the dataset into training, test and validation data. 
+I ended up with 9847 observations in the trainig set, 4923 in the validation set and 4924 in the test set.
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+#Split train/test
+set.seed(123)
+N <- nrow(data)
+idx_train <- sample(1:N,N/2)
+idx_valid <- sample(base::setdiff(1:N, idx_train), N/4)
+idx_test <- base::setdiff(base::setdiff(1:N, idx_train),idx_valid)
+data$day<-as.factor(data$day)
+data$baseday<-as.factor(data$baseday)
+data$New.Target.Variable<-as.factor(data$New.Target.Variable)
+data$Target.Variable<-NULL
+d_train <- data[idx_train,]
+d_valid <- data[idx_valid,]
+d_test  <- data[idx_test,]
+
+library(h2o)
+
+h2o.init()
+h2o.removeAll()
+dx_train <- as.h2o(d_train)
+
+dx_train$New.Target.Variable <- as.factor(dx_train$New.Target.Variable)
+dx_valid <- as.h2o(d_valid)
+dx_valid$New.Target.Variable <- as.factor(dx_valid$New.Target.Variable)
+dx_test <- as.h2o(d_test)
+dx_test$New.Target.Variable <- as.factor(dx_test$New.Target.Variable)
+```
+
+ 
+
+###**Modelling**
+
+I used three methods - Random Forest, GBM and Neural Network- which I then compared to each other to be able to choose the best model.  
+I extracted and visualized the performance metrics F1 and ROC curve for both the validation and the test set for each model and the confusion matrix (see below). I also included the most important predictors.
+
+
+####**Random Forest**
+
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+h2o.rm("RF")
+
+RF <- h2o.randomForest(
+  training_frame = dx_train,
+  validation_frame = dx_valid,
+  x=colnames(dx_train)[-5][-5][-5][-5][-5][-25],
+  y="New.Target.Variable",
+  seed=1234,
+  ntrees=100
+)
+```
+
+#####*AUC*
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+RFp<-h2o.performance(RF,valid=T)
+h2o.auc(RFp)
+RFrp<-cbind(h2o.fpr(RFp),h2o.tpr(RFp)$tpr)
+colnames(RFrp)[3]<-"tpr"
+RFt<-h2o.performance(RF,newdata = dx_test)
+RFrt<-cbind(h2o.fpr(RFt),h2o.tpr(RFt)$tpr)
+h2o.auc(RFt)
+```
+
+#####*Performance metrics * 
+
+The following two graphs show the F1 metrics and ROC curve with different threshold for validation set and test set (in this order), both figures use a warmer color for lower threshold. 
+
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+colnames(RFrt)[3]<-"tpr"
+RFev<-ggplot(h2o.F1(RFp))+geom_line(aes(x=threshold,y=f1,color=threshold),size=1)+
+  scale_color_gradient2("Threshold",low="red",high="green",mid="yellow",midpoint = 0.5)+
+  xlab("Threshold")+ylab("F1 Metric")
+RFet<-ggplot(h2o.F1(RFt))+geom_line(aes(x=threshold,y=f1,color=threshold),size=1)+
+  scale_color_gradient2("Threshold",low="red",high="green",mid="yellow",midpoint = 0.5)+
+  xlab("Threshold")+ylab("F1 Metric")
+RFav<-ggplot(RFrp,aes(x=fpr,y=tpr))+geom_line(aes(col=threshold),size=1)+xlab("False Positive Rate")+ylab("True Positive Rate")+
+  scale_color_gradient2("Threshold",low="red",high="green",mid="yellow",midpoint = 0.5)+
+  geom_segment(x=0,y=0,xend=1,yend=1,size=1,col="#00BFC4")
+RFat<-ggplot(RFrt,aes(x=fpr,y=tpr))+geom_line(aes(col=threshold),size=1)+xlab("False Positive Rate")+ylab("True Positive Rate")+
+  scale_color_gradient2("Threshold",low="red",high="green",mid="yellow",midpoint = 0.5)+
+  geom_segment(x=0,y=0,xend=1,yend=1,size=1,col="#00BFC4")
+#install.packages("gridExtra")
+library(gridExtra)
+grid.arrange(RFev,RFav,ncol=1)
+grid.arrange(RFet,RFat,ncol=1)
+library(data.table)
+```
+
+#####*Important predictors*
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+ggplot(data.table(cbind(h2o.varimp(RF)$variable[1:10],h2o.varimp(RF)$scaled_importance[1:10],h2o.varimp(RF)$relative_importance[1:10])))+
+  geom_col(aes(x=V1,y=as.numeric(V2),fill=as.numeric(V3)))+coord_flip()+scale_x_discrete(limits=rev(h2o.varimp(RF)$variable[1:10]))+
+  scale_y_continuous(breaks=seq(0,1,0.25))+
+  theme(axis.ticks=element_blank())+ylab("Relative Importance")+xlab("Variable")+
+  scale_fill_distiller(palette="Spectral",guide=F)
+```
+
+#####*Confusion matrix*
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+h2o.confusionMatrix(RFp,metrics="f1")[,1:3]
+h2o.confusionMatrix(RFt,metrics="f1")[,1:3]
+
+```
+
+
+####**GBM**
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+##GBM
+GBM <- h2o.gbm(
+  training_frame = dx_train,
+  validation_frame = dx_valid,
+  x=colnames(dx_train)[-5][-5][-5][-5][-5][-25],
+  y="New.Target.Variable",
+  seed=1234,
+  ntrees=100
+)
+```
+
+#####*AUC*
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+GBMp<-h2o.performance(GBM,valid=T)
+h2o.auc(GBMp)
+GBMrp<-cbind(h2o.fpr(GBMp),h2o.tpr(GBMp)$tpr)
+colnames(GBMrp)[3]<-"tpr"
+GBMt<-h2o.performance(GBM,newdata = dx_test)
+GBMrt<-cbind(h2o.fpr(GBMt),h2o.tpr(GBMt)$tpr)
+h2o.auc(GBMt)
+colnames(GBMrt)[3]<-"tpr"
+```
+
+#####*Performance metrics * 
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+GBMev<-ggplot(h2o.F1(GBMp))+geom_line(aes(x=threshold,y=f1,color=threshold),size=1)+
+  scale_color_gradient2("Threshold",low="red",high="green",mid="yellow",midpoint = 0.5)+
+  xlab("Threshold")+ylab("F1 Metric")
+GBMet<-ggplot(h2o.F1(GBMt))+geom_line(aes(x=threshold,y=f1,color=threshold),size=1)+
+  scale_color_gradient2("Threshold",low="red",high="green",mid="yellow",midpoint = 0.5)+
+  xlab("Threshold")+ylab("F1 Metric")
+GBMav<-ggplot(GBMrp,aes(x=fpr,y=tpr))+geom_line(aes(col=threshold),size=1)+xlab("False Positive Rate")+ylab("True Positive Rate")+
+  scale_color_gradient2("Threshold",low="red",high="green",mid="yellow",midpoint = 0.5)+
+  geom_segment(x=0,y=0,xend=1,yend=1,size=1,col="#00BFC4")
+GBMat<-ggplot(GBMrt,aes(x=fpr,y=tpr))+geom_line(aes(col=threshold),size=1)+xlab("False Positive Rate")+ylab("True Positive Rate")+
+  scale_color_gradient2("Threshold",low="red",high="green",mid="yellow",midpoint = 0.5)+
+  geom_segment(x=0,y=0,xend=1,yend=1,size=1,col="#00BFC4")
+#install.packages("gridExtra")
+library(gridExtra)
+grid.arrange(GBMev,GBMav,ncol=1)
+grid.arrange(GBMet,GBMat,ncol=1)
+library(data.table)
+```
+
+#####*Important predictors*  
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+ggplot(data.table(cbind(h2o.varimp(GBM)$variable[1:10],h2o.varimp(GBM)$scaled_importance[1:10],h2o.varimp(GBM)$relative_importance[1:10])))+
+  geom_col(aes(x=V1,y=as.numeric(V2),fill=as.numeric(V3)))+coord_flip()+scale_x_discrete(limits=rev(h2o.varimp(GBM)$variable[1:10]))+
+  scale_y_continuous(breaks=seq(0,1,0.25))+
+  theme(axis.ticks=element_blank())+ylab("Relative Importance")+xlab("Variable")+
+  scale_fill_distiller(palette="Spectral",guide=F)
+```
+
+#####*Confusion matrix*
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+h2o.confusionMatrix(GBMp,metrics="f1")[,1:3]
+h2o.confusionMatrix(GBMt,metrics="f1")[,1:3]
+```
+
+####**Neural Network**
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+##NN
+NN <- h2o.deeplearning(
+  training_frame = dx_train,
+  validation_frame = dx_valid,
+  x=colnames(dx_train)[-5][-5][-5][-5][-5][-25],
+  y="New.Target.Variable",
+  seed=1234
+)
+```
+
+#####*AUC*
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+NNp<-h2o.performance(NN,valid=T)
+h2o.auc(NNp)
+NNrp<-cbind(h2o.fpr(NNp),h2o.tpr(NNp)$tpr)
+colnames(NNrp)[3]<-"tpr"
+NNt<-h2o.performance(NN,newdata = dx_test)
+NNrt<-cbind(h2o.fpr(NNt),h2o.tpr(NNt)$tpr)
+h2o.auc(NNt)
+colnames(NNrt)[3]<-"tpr"
+```
+
+#####*Performance metrics *
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+NNev<-ggplot(h2o.F1(NNp))+geom_line(aes(x=threshold,y=f1,color=threshold),size=1)+
+  scale_color_gradient2("Threshold",low="red",high="green",mid="yellow",midpoint = 0.5)+
+  xlab("Threshold")+ylab("F1 Metric")
+NNet<-ggplot(h2o.F1(NNt))+geom_line(aes(x=threshold,y=f1,color=threshold),size=1)+
+  scale_color_gradient2("Threshold",low="red",high="green",mid="yellow",midpoint = 0.5)+
+  xlab("Threshold")+ylab("F1 Metric")
+NNav<-ggplot(NNrp,aes(x=fpr,y=tpr))+geom_line(aes(col=threshold),size=1)+xlab("False Positive Rate")+ylab("True Positive Rate")+
+  scale_color_gradient2("Threshold",low="red",high="green",mid="yellow",midpoint = 0.5)+
+  geom_segment(x=0,y=0,xend=1,yend=1,size=1,col="#00BFC4")
+NNat<-ggplot(NNrt,aes(x=fpr,y=tpr))+geom_line(aes(col=threshold),size=1)+xlab("False Positive Rate")+ylab("True Positive Rate")+
+  scale_color_gradient2("Threshold",low="red",high="green",mid="yellow",midpoint = 0.5)+
+  geom_segment(x=0,y=0,xend=1,yend=1,size=1,col="#00BFC4")
+#install.packages("gridExtra")
+library(gridExtra)
+grid.arrange(NNev,NNav,ncol=1)
+grid.arrange(NNet,NNat,ncol=1)
+library(data.table)
+```
+
+#####*Confusion matrix*
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+h2o.confusionMatrix(NNp,metrics="f1")[,1:3]
+h2o.confusionMatrix(NNt,metrics="f1")[,1:3]
+```
+
+##**4. Summary**
+
+Below table summarizes the AUC, F1 score and Classification error of the test set for each model:
+
+| Metrics    |  RF  | GBM  |  NN  | 
+|------------|:----:|:----:|:----:|
+|AUC|`r round(as.numeric(h2o.auc(RFt)),4)`|`r round(as.numeric(h2o.auc(GBMt)),4)`|`r round(as.numeric(h2o.auc(NNt)),4)`| 
+|F1|`r round(as.numeric(h2o.F1(RFt,thresholds = h2o.find_threshold_by_max_metric(RFt,metric="f1"))),4)`|`r round(as.numeric(h2o.F1(GBMt,thresholds = h2o.find_threshold_by_max_metric(GBMt,metric="f1"))),4)`|`r round(as.numeric(h2o.F1(NNt,thresholds = h2o.find_threshold_by_max_metric(NNt,metric="f1"))),4)`| 
+|Error (FN/P)|`r round(as.numeric(h2o.confusionMatrix(RFt,metrics="f1")[2,3]),4)`|`r round(as.numeric(h2o.confusionMatrix(GBMt,metrics="f1")[2,3]),4)`|`r round(as.numeric(h2o.confusionMatrix(NNt,metrics="f1")[2,3]),4)`| 
+|Error (FP/N)|`r round(as.numeric(h2o.confusionMatrix(RFt,metrics="f1")[1,3]),4)`|`r round(as.numeric(h2o.confusionMatrix(GBMt,metrics="f1")[1,3]),4)`|`r round(as.numeric(h2o.confusionMatrix(NNt,metrics="f1")[1,3]),4)`|  
+
+Based on the above the best fitting model for this predition is Random Forest, since it has the highest AUC and F score and the lowest classification error rates. Also it has the most balanced ratio between the two type of classification errors. On the contrary, Neural Network has the worst results amongst the models, even though all three give a quiet good fit. Overall I would put Random Forest in production.
+
